@@ -1,0 +1,29 @@
+services:
+  redis:
+    image: redis:7.4.0
+    container_name: redis_container
+    env_file:
+      - ./redis/.env
+    ports:
+      - "6380:6379"
+    volumes:
+      - ./redis/data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - ./redis/users.acl:/usr/local/etc/redis/users.acl
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512m
+        reservations:
+          cpus: '0.25'
+          memory: 256m
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--aclfile", "/usr/local/etc/redis/users.acl"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$REDIS_PASSWORD", "ping"]  # Fix me
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
