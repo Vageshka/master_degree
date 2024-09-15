@@ -92,6 +92,8 @@ class RedisWrapper:
         map_key = self.get_key(db_name, table_name, 'shards')
         db_master_key = self.get_key(db_name, 'master')
         db_replicas_key = self.get_key(db_name, 'replicas')
+        if not self.client.exists(db_master_key):
+            raise ValueError(f"No info about db {db_name}")
 
         # Copy info of main db servers into shard data
         r_master, w_master = self.get_shard_rw_keys(map_key, 0, self.CONST_MODULO)
@@ -115,6 +117,13 @@ class RedisWrapper:
             raise ValueError(f"One of keys was not set: {r_master_key} or {w_master_key}")
 
         return r_master_key == w_master_key
+
+    def is_shard_exists(self, db_name: str, table_name: str, shard_start: int, shard_end: int) -> bool:
+        shard_map = self.get_shard_map(db_name, table_name)
+        for index in range(len(shard_map) - 1):
+            if shard_map[index] == shard_start and shard_end == shard_map[index+1]:
+                return True
+        return False
 
     def split_shard(self, db_name: str, table_name: str, shard_start: int, shard_end: int,
                     new_server: str, new_replicas: list | set = None):
@@ -146,6 +155,10 @@ class RedisWrapper:
         # change map
         self.client.linsert(shards_key, 'after', shard_start, pivot)
 
+    def get_shard_map(self, db_name: str, table_name: str):
+        shards_key = self.get_key(db_name, table_name, 'shards')
+        return self.client.lrange(shards_key, 0, self.CONST_MODULO)
+
     def get_shard_servers_hash_by_record(self, db_name: str, table_name: str, record_key: int) -> dict:
         remainder = abs(record_key % self.CONST_MODULO)
         shards_key = self.get_key(db_name, table_name, 'shards')
@@ -156,8 +169,8 @@ class RedisWrapper:
             right_index += 1
         left, right = shard_map[right_index - 1], shard_map[right_index]
 
-        r_master_key, w_master_key = self.get_shard_rw_keys(shard_map, left, right)
-        r_replicas_key, w_replicas_key = self.get_shard_rw_keys(shard_map, left, right, master=False)
+        r_master_key, w_master_key = self.get_shard_rw_keys(shards_key, left, right)
+        r_replicas_key, w_replicas_key = self.get_shard_rw_keys(shards_key, left, right, master=False)
 
         return {
             'read': {
@@ -179,10 +192,3 @@ class RedisWrapper:
         all_server_keys = self.client.keys(f"{key_prefix}*")
         return [server_key.replace(key_prefix, '') for server_key in all_server_keys]
 
-
-def main(argv=None):
-    redis_wrapper = RedisWrapper()
-
-
-if __name__ == '__main__':
-    sys.exit(main())
