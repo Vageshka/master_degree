@@ -5,8 +5,8 @@ import redis
 import sys
 import xxhash
 
-REDIS_HOST = "127.0.0.1"
-REDIS_PORT = "6380"
+REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = os.getenv("REDIS_PORT", "6380")
 REDIS_USER = os.getenv("REDIS_USER")
 REDIS_PASSWORD = os.getenv("REDIS_USER_PASSWORD")
 
