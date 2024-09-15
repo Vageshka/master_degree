@@ -3,6 +3,7 @@ import logging
 import os
 import redis
 import sys
+import xxhash
 
 REDIS_HOST = "127.0.0.1"
 REDIS_PORT = "6380"
@@ -20,7 +21,8 @@ class RedisWrapper:
                  user=REDIS_USER, password=REDIS_PASSWORD):
         
         self._redis = redis.Redis(host=host, port=port, username=user, password=password)
-        logging.info(f"Redis version: {self._redis.info('server')['redis_version']}")
+        self._version = self._redis.info('server')['redis_version']
+        # logging.info(f"Redis version: {self._version}")
 
     @property
     def client(self) -> redis.Redis:
@@ -147,9 +149,9 @@ class RedisWrapper:
             if index % 2 != 0:  # only read nodes
                 continue
             self.client.copy(key, key.replace(old_shard_hash, second_shard_hash), replace=True)
-        self.assign_server_hash_to_key(old_shard_hash[1].replace(old_shard_hash, second_shard_hash), new_server)
+        self.assign_server_hash_to_key(old_shard_keys[1].replace(old_shard_hash, second_shard_hash), new_server)
         if new_replicas:
-            replicas_key = old_shard_hash[3].replace(old_shard_hash, second_shard_hash)
+            replicas_key = old_shard_keys[3].replace(old_shard_hash, second_shard_hash)
             self.assign_server_set_to_key(replicas_key, new_replicas)
 
         # change map
@@ -157,12 +159,12 @@ class RedisWrapper:
 
     def get_shard_map(self, db_name: str, table_name: str):
         shards_key = self.get_key(db_name, table_name, 'shards')
-        return self.client.lrange(shards_key, 0, self.CONST_MODULO)
+        return [int(val) for val in self.client.lrange(shards_key, 0, -1)]
 
     def get_shard_servers_hash_by_record(self, db_name: str, table_name: str, record_key: int) -> dict:
         remainder = abs(record_key % self.CONST_MODULO)
         shards_key = self.get_key(db_name, table_name, 'shards')
-        shard_map = self.client.lrange(shards_key, 0, self.CONST_MODULO)
+        shard_map = self.get_shard_map(db_name, table_name)
 
         right_index = 1
         while shard_map[right_index] < remainder:
@@ -174,21 +176,29 @@ class RedisWrapper:
 
         return {
             'read': {
-                'master': self.client.get(r_master_key),
-                'replicas': self.client.smembers(r_replicas_key)
+                'master': self.client.get(r_master_key).decode('utf-8'),
+                'replicas': [val.decode('utf-8') for val in self.client.smembers(r_replicas_key)]
             },
             'write': {
-                'master': self.client.get(w_master_key),
-                'replicas': self.client.smembers(w_replicas_key)
+                'master': self.client.get(w_master_key).decode('utf-8'),
+                'replicas': [val.decode('utf-8') for val in self.client.smembers(w_replicas_key)]
             },
         }
 
     def get_server_info(self, server_hash: str) -> dict:
         key = self.get_server_key(server_hash)
-        return self.client.hgetall(key)
+        info = {}
+        for key, val in self.client.hgetall(key).items():
+            info[key.decode('utf-8')] = val.decode('utf-8')
+        return info
 
     def get_all_servers_hash(self) -> list:
         key_prefix = self.get_server_key('')
         all_server_keys = self.client.keys(f"{key_prefix}*")
-        return [server_key.replace(key_prefix, '') for server_key in all_server_keys]
+        return [server_key.decode('utf-8').replace(key_prefix, '') for server_key in all_server_keys]
 
+    @staticmethod
+    def get_str_hash(value: str):
+        x = xxhash.xxh128()
+        x.update(value)
+        return x.intdigest()

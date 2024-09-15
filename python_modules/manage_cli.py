@@ -88,7 +88,7 @@ def process_sever_actions(opts, redis_wrapper):
         servers = redis_wrapper.get_all_servers_hash()
         logger.info(f"Список добавленных в конфигурацию серверов:")
         for index, shash in enumerate(servers):
-            logger.info(f"{index}. {shash}")
+            logger.info(f"{index+1}. {shash}")
 
 
 def process_db_actions(opts, redis_wrapper):
@@ -107,16 +107,19 @@ def process_table_actions(opts, redis_wrapper):
         for index in range(len(shard_map) - 1):
             logger.info(f"{index+1}. [{shard_map[index]}, {shard_map[index+1]})")
     elif opts.action == 'get-shard':
-        shard_servers = redis_wrapper.get_shard_servers_hash_by_record(opts.db, opts.name, opts.record_key)
+        key_hash = redis_wrapper.get_str_hash(opts.record_key)
+        logger.info(f"Хеш ключа: {key_hash}. Остаток от деления: {key_hash % redis_wrapper.CONST_MODULO}")
+        shard_servers = redis_wrapper.get_shard_servers_hash_by_record(opts.db, opts.name, key_hash)
         logger.info(f"Основной сервер для чтения: {shard_servers['read']['master']}")
         logger.info(f"Реплики сервера для чтения: {json.dumps(shard_servers['read']['replicas'])}")
         logger.info(f"Основной сервер для записи: {shard_servers['write']['master']}")
         logger.info(f"Реплики сервера для записи: {json.dumps(shard_servers['write']['replicas'])}")
     elif opts.action == 'split-shard':
-        if not redis_wrapper.is_shard_exists(opts.name, opts.shard_start, opts.shard_end, opts.master):
+        if not redis_wrapper.is_shard_exists(opts.db, opts.name, opts.shard_start, opts.shard_end):
             logger.error(f"Не существует шард относящийся к диапазону [{opts.shard_start}, {opts.shard_end})")
             sys.exit(1)
         redis_wrapper.split_shard(opts.db, opts.name, opts.shard_start, opts.shard_end, opts.master, opts.replicas)
+        logger.info("Данные успешно обновлены")
 
 
 def main(args=None):
